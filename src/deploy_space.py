@@ -82,6 +82,7 @@ def deploy(
             repo_id=space,
             repo_type="space",
             folder_path=tmp,
+            delete_patterns=["*"],  # the Space mirrors deploy/space exactly (no stale files)
             commit_message=f"Deploy static site (model {model_repo}@{revision}"
             + (f", api image {image}" if image else "")
             + ")",

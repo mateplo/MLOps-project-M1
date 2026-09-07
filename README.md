@@ -1,5 +1,13 @@
 # Adult Income Classifier — Pipelines, MLflow & un cycle MLOps complet
 
+[![CI](https://github.com/mateplo/MLOps-project-M1/actions/workflows/ci.yml/badge.svg)](https://github.com/mateplo/MLOps-project-M1/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mateplo/MLOps-project-M1)](https://github.com/mateplo/MLOps-project-M1/releases/latest)
+[![GHCR](https://img.shields.io/badge/ghcr.io-mlops--project--m1-blue?logo=docker)](https://github.com/mateplo/MLOps-project-M1/pkgs/container/mlops-project-m1)
+[![Model on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Model-Mateplo%2Fadult--income--classifier-yellow)](https://huggingface.co/Mateplo/adult-income-classifier)
+[![Demo on HF Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Demo-Space-orange)](https://huggingface.co/spaces/Mateplo/adult-income-classifier)
+
+**Démo en ligne** : https://huggingface.co/spaces/Mateplo/adult-income-classifier — le modèle champion tourne dans le navigateur (ONNX Runtime Web), la page affiche la version du registre MLflow, le `run_id` et le seuil qu'elle utilise.
+
 Projet MLOps (M1) : pipeline de classification tabulaire reproductible avec scikit-learn
 (`Pipeline` + `ColumnTransformer`), tuning par validation croisée, **suivi complet dans MLflow**
 (paramètres, métriques, artefacts, lignée des données, registre de modèles avec promotion
