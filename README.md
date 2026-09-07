@@ -197,6 +197,19 @@ make compose-down
 
 Pour pointer le venv local vers ce serveur : `export MLFLOW_TRACKING_URI=http://localhost:5001`.
 
+## Release
+
+L'image n'est publiée sur GHCR que sur un tag `v*`. Avant de tagger, `make release-check` refuse la release si :
+arbre Git non propre, CI non verte sur le commit courant, modèle exporté qui n'est pas le `champion`,
+`test_roc_auc` sous `MIN_AUC` (0.92 par défaut), image qui ne sert pas exactement cette version
+(`/health` doit renvoyer la même version et le même `run_id`), ou erreurs sur 200 requêtes réelles.
+
+```bash
+make release-check                     # toutes les vérifications, conteneur de test sur :8001
+git tag -a v1.0.0 -m "AdultIncomeClassifier v9 (test_roc_auc 0.930)" && git push origin v1.0.0
+docker pull ghcr.io/mateplo/mlops-project-m1:1.0.0     # une fois le package rendu public
+```
+
 ## CI (GitHub Actions)
 
 - **test** : `ruff check`, `ruff format --check`, `pytest` (avec le test bout en bout sur données synthétiques et registre SQLite temporaire).
