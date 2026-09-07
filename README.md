@@ -215,6 +215,18 @@ git tag -a v1.0.0 -m "AdultIncomeClassifier v9 (test_roc_auc 0.930)" && git push
 docker pull ghcr.io/mateplo/mlops-project-m1:1.0.0     # une fois le package rendu public
 ```
 
+## Workflow Git
+
+- **`main` est protégée** : pas de push direct, les checks `Lint + tests` et `Docker build (+ push on tag)` doivent passer avant fusion. Tout commit sur `main` est donc déployable.
+- **Une branche courte par changement** (`feat/…`, `fix/…`, `docs/…`), fusionnée par pull request. Le template de PR rappelle la checklist et, quand le modèle change, demande le résultat de `make promote`.
+- **Les tags `v*` marquent les releases** : `make release-check` puis `git tag -a vX.Y.Z` (voir ci-dessus). Pas de branche `develop` ni `release/*` : le tag et le gate jouent ce rôle.
+
+```bash
+git switch -c feat/ma-modif
+# ... commits ...
+git push -u origin feat/ma-modif        # puis ouvrir la PR sur GitHub, fusionner quand la CI est verte
+```
+
 ## CI (GitHub Actions)
 
 - **test** : `ruff check`, `ruff format --check`, `pytest` (avec le test bout en bout sur données synthétiques et registre SQLite temporaire).
