@@ -1,0 +1,53 @@
+data:
+  url: https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data
+  test_url: https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test
+  csv_path: data/raw.csv
+  target: income
+  positive_label: ">50K"
+  test_size: 0.2
+  random_state: 42
+  # Columns of the original UCI file (no header in the source)
+  columns:
+    - age
+    - workclass
+    - fnlwgt
+    - education
+    - education_num
+    - marital_status
+    - occupation
+    - relationship
+    - race
+    - sex
+    - capital_gain
+    - capital_loss
+    - hours_per_week
+    - native_country
+    - income
+
+features:
+  numeric: [age, fnlwgt, education_num, capital_gain, capital_loss, hours_per_week]
+  # `education` is dropped: it is redundant with `education_num` (ordinal encoding).
+  categorical: [workclass, marital_status, occupation, relationship, race, sex, native_country]
+
+model:
+  type: logreg  # logreg | random_forest | gradient_boosting
+  params:
+    C: [0.1, 1.0, 10.0]
+    penalty: [l2]
+    solver: [lbfgs]
+
+cv:
+  strategy: StratifiedKFold
+  n_splits: 5
+  scoring: roc_auc
+  n_jobs: -1
+
+mlflow:
+  experiment_name: adult-income
+  registered_model_name: AdultIncomeClassifier
+  register: true
+  alias: staging
+
+artifacts:
+  dir: artifacts
+  model_path: artifacts/model.joblib

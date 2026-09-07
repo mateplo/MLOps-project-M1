@@ -1,0 +1,52 @@
+# Alternative model config: Random Forest. Usage: make train CONFIG=configs/config_rf.yaml
+data:
+  url: https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data
+  test_url: https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test
+  csv_path: data/raw.csv
+  target: income
+  positive_label: ">50K"
+  test_size: 0.2
+  random_state: 42
+  columns:
+    - age
+    - workclass
+    - fnlwgt
+    - education
+    - education_num
+    - marital_status
+    - occupation
+    - relationship
+    - race
+    - sex
+    - capital_gain
+    - capital_loss
+    - hours_per_week
+    - native_country
+    - income
+
+features:
+  numeric: [age, fnlwgt, education_num, capital_gain, capital_loss, hours_per_week]
+  categorical: [workclass, marital_status, occupation, relationship, race, sex, native_country]
+
+model:
+  type: random_forest
+  params:
+    n_estimators: [200]
+    max_depth: [10, 20, null]
+    min_samples_leaf: [1, 5]
+
+cv:
+  strategy: StratifiedKFold
+  n_splits: 5
+  scoring: roc_auc
+  n_jobs: -1
+
+mlflow:
+  experiment_name: adult-income
+  registered_model_name: AdultIncomeClassifier
+  register: true
+  alias: staging
+
+artifacts:
+  dir: artifacts
+  model_path: artifacts/model.joblib
