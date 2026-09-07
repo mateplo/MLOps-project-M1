@@ -1,97 +1,103 @@
-"""Train + tune the pipeline with GridSearchCV, track with MLflow, register the best model.
+"""Train + tune the pipeline with GridSearchCV, track with MLflow, register a *challenger*.
+
+Steps
+  1. load + validate data, log its fingerprint (lineage)
+  2. GridSearchCV (stratified k-fold) on the training split, MLflow autolog
+  3. out-of-fold probabilities -> F1-optimal decision threshold
+  4. held-out test metrics at that threshold, feature importance plot
+  5. log model (signature + metadata), register as `challenger` (promotion is a separate step)
+  6. write artifacts/model.joblib + artifacts/model_meta.json for serving
 
 Usage:
-    python src/train.py --config configs/config.yaml
+    python -m src.train --config configs/config.yaml
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import time
 from pathlib import Path
 
 import joblib
 import mlflow
+import mlflow.data
 import mlflow.sklearn
-import numpy as np
 from mlflow.models import infer_signature
-from sklearn.metrics import (
-    accuracy_score,
-    average_precision_score,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_predict
 
-from src.pipeline import build_pipeline, get_feature_names
+from src.metrics import best_threshold, compute_metrics
+from src.pipeline import (
+    build_pipeline_from_config,
+    get_feature_importance,
+    get_feature_names,
+    param_prefix,
+)
 from src.utils import (
-    PROJECT_ROOT,
+    file_fingerprint,
+    get_logger,
     load_config,
-    load_data,
+    load_dataframe,
+    meta_path,
     plot_feature_importance,
+    resolve,
     setup_mlflow,
     split_data,
+    split_features,
+    write_meta,
 )
 
+log = get_logger(__name__)
 
-def make_param_grid(params: dict) -> dict:
+
+def make_param_grid(params: dict, prefix: str = "model__") -> dict:
     """Prefix the config grid with the pipeline step name (`model__C`, ...)."""
-    return {f"model__{k}": (v if isinstance(v, list) else [v]) for k, v in params.items()}
+    return {f"{prefix}{k}": (v if isinstance(v, list) else [v]) for k, v in params.items()}
 
 
-def compute_metrics(y_true, y_pred, y_score) -> dict[str, float]:
-    return {
-        "test_roc_auc": roc_auc_score(y_true, y_score),
-        "test_average_precision": average_precision_score(y_true, y_score),
-        "test_accuracy": accuracy_score(y_true, y_pred),
-        "test_precision": precision_score(y_true, y_pred, zero_division=0),
-        "test_recall": recall_score(y_true, y_pred),
-        "test_f1": f1_score(y_true, y_pred),
-    }
-
-
-def register_model(model_uri: str, cfg: dict) -> str | None:
-    """Register the logged model and attach an alias (MLflow >= 2.9) + legacy stage."""
+def register_challenger(
+    model_uri: str, cfg: dict, tags: dict
+) -> mlflow.entities.model_registry.ModelVersion | None:
+    """Register the logged model as a new version tagged as the current challenger."""
     ml_cfg = cfg.get("mlflow", {})
     if not ml_cfg.get("register", False):
         return None
     name = ml_cfg["registered_model_name"]
     mv = mlflow.register_model(model_uri=model_uri, name=name)
     client = mlflow.MlflowClient()
-    alias = ml_cfg.get("alias")
-    if alias:
-        client.set_registered_model_alias(name, alias, mv.version)
-    # Stages are deprecated in MLflow 2.9+, but still requested by the course proposal.
+    client.set_registered_model_alias(
+        name, ml_cfg.get("challenger_alias", "challenger"), mv.version
+    )
+    for k, v in tags.items():
+        client.set_model_version_tag(name, mv.version, k, str(v))
+    # Stages are deprecated since MLflow 2.9 but the course asks for "Staging".
     try:
         client.transition_model_version_stage(name, mv.version, stage="Staging")
-    except Exception as exc:  # pragma: no cover - depends on MLflow version/backend
-        print(f"[warn] could not set legacy stage: {exc}")
-    return f"models:/{name}/{mv.version}"
+    except Exception as exc:  # pragma: no cover
+        log.warning("could not set legacy stage: %s", exc)
+    log.info("registered %s version %s as challenger", name, mv.version)
+    return mv
 
 
 def train(cfg: dict, cfg_path: Path = Path("configs/config.yaml")) -> str:
     experiment = setup_mlflow(cfg)
     mlflow.sklearn.autolog(log_models=False, log_input_examples=False, silent=True)
 
-    X, y = load_data(cfg)
+    # ---- Data + lineage ---------------------------------------------------
+    df = load_dataframe(cfg, validate=True)
+    X, y = split_features(df, cfg)
     X_train, X_test, y_train, y_test = split_data(X, y, cfg)
+    fingerprint = file_fingerprint(cfg["data"]["csv_path"])
 
-    feats = cfg["features"]
+    # ---- Model + search space -----------------------------------------------
     model_type = cfg["model"]["type"]
-    pipe = build_pipeline(
-        feats["numeric"], feats["categorical"], model_type, cfg["data"]["random_state"]
-    )
-
+    pipe = build_pipeline_from_config(cfg)
     cv_cfg = cfg["cv"]
     cv = StratifiedKFold(
         n_splits=cv_cfg["n_splits"], shuffle=True, random_state=cfg["data"]["random_state"]
     )
     grid = GridSearchCV(
         pipe,
-        param_grid=make_param_grid(cfg["model"].get("params", {})),
+        param_grid=make_param_grid(cfg["model"].get("params", {}), param_prefix(cfg)),
         cv=cv,
         scoring=cv_cfg["scoring"],
         n_jobs=cv_cfg.get("n_jobs", -1),
@@ -107,14 +113,27 @@ def train(cfg: dict, cfg_path: Path = Path("configs/config.yaml")) -> str:
                 "dataset": "uci-adult-income",
                 "stage": "train",
                 "config": str(cfg_path),
+                "calibrated": bool(cfg["model"].get("calibrate")),
             }
         )
+        dataset = mlflow.data.from_pandas(
+            df,
+            source=fingerprint["data_path"],
+            name="adult-income-raw",
+            targets=cfg["data"]["target"],
+        )
+        mlflow.log_input(dataset, context="training")
         mlflow.log_params(
             {
+                **fingerprint,
+                "data_rows": len(df),
+                "data_positive_rate": round(float(y.mean()), 4),
                 "n_train": len(X_train),
                 "n_test": len(X_test),
-                "n_numeric": len(feats["numeric"]),
-                "n_categorical": len(feats["categorical"]),
+                "features_numeric": ",".join(cfg["features"]["numeric"]),
+                "features_categorical": ",".join(cfg["features"]["categorical"]),
+                "features_log1p": ",".join(cfg["features"].get("log1p", []) or []),
+                "ohe_min_frequency": cfg["features"].get("min_frequency"),
                 "cv_strategy": cv_cfg["strategy"],
                 "cv_n_splits": cv_cfg["n_splits"],
                 "cv_scoring": cv_cfg["scoring"],
@@ -122,71 +141,87 @@ def train(cfg: dict, cfg_path: Path = Path("configs/config.yaml")) -> str:
         )
         mlflow.log_artifact(str(cfg_path), artifact_path="config")
 
+        # ---- Tuning ------------------------------------------------------------
+        log.info("grid search: %s", grid.param_grid)
         grid.fit(X_train, y_train)
         best = grid.best_estimator_
+        log.info(
+            "best params %s (cv %s=%.4f)", grid.best_params_, cv_cfg["scoring"], grid.best_score_
+        )
 
-        # ---- Test-set metrics (held out, never seen during CV) -------------
-        y_pred = best.predict(X_test)
+        # ---- Decision threshold from out-of-fold predictions ---------------------
+        oof = cross_val_predict(
+            best, X_train, y_train, cv=cv, method="predict_proba", n_jobs=cv_cfg.get("n_jobs", -1)
+        )[:, 1]
+        threshold, cv_f1 = best_threshold(y_train, oof)
+        mlflow.log_param("decision_threshold", round(threshold, 4))
+        mlflow.log_metric("cv_f1_at_threshold", cv_f1)
+        mlflow.log_metric("cv_best_roc_auc", float(grid.best_score_))
+
+        # ---- Held-out test metrics -----------------------------------------------
         y_score = best.predict_proba(X_test)[:, 1]
-        metrics = compute_metrics(y_test, y_pred, y_score)
-        metrics["cv_best_roc_auc"] = float(grid.best_score_)
-        mlflow.log_metrics(metrics)
+        metrics = compute_metrics(y_test, y_score, threshold)
+        mlflow.log_metrics({k: v for k, v in metrics.items() if k != "decision_threshold"})
 
-        # ---- Feature importance / coefficients ------------------------------
-        art_dir = PROJECT_ROOT / cfg["artifacts"]["dir"]
+        # ---- Feature importance ----------------------------------------------------
+        art_dir = resolve(cfg["artifacts"]["dir"])
         art_dir.mkdir(parents=True, exist_ok=True)
-        model = best.named_steps["model"]
-        names = get_feature_names(best)
-        values = None
-        if hasattr(model, "feature_importances_"):
-            values = model.feature_importances_
-        elif hasattr(model, "coef_"):
-            values = model.coef_.ravel()
-        if values is not None:
-            mlflow.log_artifact(str(plot_feature_importance(names, values, art_dir)))
+        importance = get_feature_importance(best)
+        if importance is not None:
+            path = plot_feature_importance(get_feature_names(best), importance, art_dir)
+            mlflow.log_artifact(str(path))
 
-        # ---- Log + register the best model ----------------------------------
+        # ---- Log + register -----------------------------------------------------------
+        model_meta = {
+            "decision_threshold": threshold,
+            "model_type": model_type,
+            "data_sha256": fingerprint["data_sha256"],
+        }
         signature = infer_signature(X_train, y_score)
         mlflow.sklearn.log_model(
             best,
             artifact_path="model",
             signature=signature,
             input_example=X_train.head(5),
+            metadata=model_meta,
         )
         model_uri = f"runs:/{run.info.run_id}/model"
-        registered_uri = register_model(model_uri, cfg)
+        version_tags = {**model_meta, "test_roc_auc": round(metrics["test_roc_auc"], 5)}
+        mv = register_challenger(model_uri, cfg, version_tags)
 
-        # ---- Local copy for evaluate.py / predict.py / API -------------------
-        model_path = PROJECT_ROOT / cfg["artifacts"]["model_path"]
+        # ---- Local artifacts for serving -----------------------------------------------
+        model_path = resolve(cfg["artifacts"]["model_path"])
         joblib.dump(best, model_path)
-        with open(art_dir / "train_run.json", "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "run_id": run.info.run_id,
-                    "experiment": experiment,
-                    "model_uri": model_uri,
-                    "registered_model_uri": registered_uri,
-                    "best_params": {k: _jsonable(v) for k, v in grid.best_params_.items()},
-                    "metrics": metrics,
-                },
-                f,
-                indent=2,
-            )
+        write_meta(
+            meta_path(cfg),
+            {
+                "model_name": cfg["mlflow"]["registered_model_name"],
+                "version": str(mv.version) if mv else None,
+                "alias": cfg["mlflow"].get("challenger_alias", "challenger") if mv else None,
+                "run_id": run.info.run_id,
+                "experiment": experiment,
+                "model_uri": model_uri,
+                "model_type": model_type,
+                "decision_threshold": threshold,
+                "best_params": grid.best_params_,
+                "metrics": metrics,
+                "data_sha256": fingerprint["data_sha256"],
+                "trained_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+        )
 
-        print(f"Run id           : {run.info.run_id}")
-        print(f"Best params      : {grid.best_params_}")
-        print(f"CV best ROC-AUC  : {grid.best_score_:.4f}")
-        print(f"Test ROC-AUC     : {metrics['test_roc_auc']:.4f}")
-        print(f"Model saved to   : {model_path}")
-        if registered_uri:
-            print(f"Registered as    : {registered_uri}")
+        log.info("run_id=%s", run.info.run_id)
+        log.info("threshold=%.3f (cv F1 %.4f)", threshold, cv_f1)
+        log.info(
+            "test roc_auc=%.4f ap=%.4f f1=%.4f (f1@0.5=%.4f) brier=%.4f",
+            metrics["test_roc_auc"],
+            metrics["test_average_precision"],
+            metrics["test_f1"],
+            metrics["test_f1_at_0.5"],
+            metrics["test_brier"],
+        )
+        log.info("model saved to %s", model_path)
         return run.info.run_id
-
-
-def _jsonable(v):
-    if isinstance(v, (np.integer, np.floating)):
-        return v.item()
-    return v
 
 
 def main() -> None:

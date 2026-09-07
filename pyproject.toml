@@ -8,4 +8,5 @@ select = ["E", "F", "I", "W", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["slow: end-to-end tests (train + registry)"]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]

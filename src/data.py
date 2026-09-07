@@ -12,7 +12,9 @@ import io
 import pandas as pd
 import requests
 
-from src.utils import PROJECT_ROOT, load_config
+from src.utils import PROJECT_ROOT, get_logger, load_config
+
+log = get_logger(__name__)
 
 
 def _fetch(url: str, columns: list[str], skiprows: int = 0) -> pd.DataFrame:
@@ -47,13 +49,13 @@ def main() -> None:
     cfg = load_config(args.config)
     out = PROJECT_ROOT / cfg["data"]["csv_path"]
     if out.exists() and not args.force:
-        print(f"{out} already exists, skipping (use --force to re-download).")
+        log.info("%s already exists, skipping (use --force to re-download)", out)
         return
 
     df = download(cfg)
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, index=False)
-    print(f"Wrote {len(df):,} rows x {df.shape[1]} cols to {out}")
+    log.info("wrote %d rows x %d cols to %s", len(df), df.shape[1], out)
 
 
 if __name__ == "__main__":

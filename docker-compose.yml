@@ -1,0 +1,87 @@
+# Local MLOps stack. No cloud needed.
+#
+#   docker compose up -d mlflow api                       # tracking server + API
+#   docker compose --profile train run --rm train         # full pipeline against the server
+#   docker compose --profile monitoring up -d             # + Prometheus + Grafana
+#
+# MLflow UI  : http://localhost:5001
+# API        : http://localhost:8000/docs
+# Prometheus : http://localhost:9090
+# Grafana    : http://localhost:3000  (admin / admin)
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.19.0
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+    ports: ["5001:5000"]
+    volumes: [mlflow-data:/mlflow]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/health').status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: { context: ., target: serve }
+    image: adult-income-classifier:latest
+    ports: ["8000:8000"]
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./logs:/app/logs
+    environment:
+      MODEL_PATH: artifacts/model.joblib
+      PREDICTION_LOG: logs/predictions.jsonl
+
+  train:
+    profiles: [train]
+    build: { context: ., target: train }
+    image: adult-income-classifier:train
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT_NAME: adult-income
+      CONFIG: ${CONFIG:-configs/config.yaml}
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+    depends_on:
+      mlflow: { condition: service_healthy }
+    command:
+      - sh
+      - -ec
+      - |
+        python -m src.data --config "$$CONFIG"
+        python -m src.train --config "$$CONFIG"
+        python -m src.promote --config "$$CONFIG"
+        python -m src.evaluate --config "$$CONFIG"
+        python -m src.export --config "$$CONFIG"
+
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v2.54.1
+    ports: ["9090:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on: [api]
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:11.2.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on: [prometheus]
+
+volumes:
+  mlflow-data:
+  prometheus-data:
+  grafana-data:

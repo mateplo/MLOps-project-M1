@@ -1,4 +1,4 @@
-# Alternative model config: Random Forest + isotonic calibration. Usage: make train CONFIG=configs/config_rf.yaml
+# CI smoke config: tiny grid, 2 folds, 5k rows. Usage: make train CONFIG=configs/config_ci.yaml
 data:
   url: https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data
   test_url: https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test
@@ -7,6 +7,7 @@ data:
   positive_label: ">50K"
   test_size: 0.2
   random_state: 42
+  sample_rows: 5000            # CI smoke run: small subsample, 2-fold CV
   # Columns of the original UCI file (no header in the source)
   columns: [age, workclass, fnlwgt, education, education_num, marital_status, occupation,
             relationship, race, sex, capital_gain, capital_loss, hours_per_week, native_country, income]
@@ -38,19 +39,13 @@ features:
   min_frequency: 0.01                        # one-hot: group categories rarer than 1% (native_country has 41)
 
 model:
-  type: random_forest
+  type: logreg
   params:
-    n_estimators: [200]
-    max_depth: [10, 20, null]
-    min_samples_leaf: [1, 5]
-  # RF probabilities are poorly calibrated: wrap in CalibratedClassifierCV (isotonic, 3-fold)
-  calibrate:
-    method: isotonic
-    cv: 3
+    C: [1.0]
 
 cv:
   strategy: StratifiedKFold
-  n_splits: 5
+  n_splits: 2
   scoring: roc_auc
   n_jobs: -1
 

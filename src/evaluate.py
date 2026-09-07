@@ -1,8 +1,8 @@
-"""Final evaluation of the trained model: metrics, ROC/PR/confusion plots, predictions CSV,
-per-subgroup metrics. Everything is logged to MLflow as an `evaluate` run.
+"""Final evaluation of a model: metrics at the tuned threshold, ROC/PR/confusion/calibration plots,
+predictions CSV, per-subgroup metrics. Everything is logged to MLflow as an `evaluate` run.
 
 Usage:
-    python src/evaluate.py --config configs/config.yaml [--model artifacts/model.joblib]
+    python -m src.evaluate --config configs/config.yaml [--model <joblib | models:/Name@champion>]
 """
 
 from __future__ import annotations
@@ -13,39 +13,51 @@ from pathlib import Path
 
 import joblib
 import mlflow
+import mlflow.sklearn
 import pandas as pd
 from sklearn.metrics import classification_report, roc_auc_score
 
-from src.train import compute_metrics
+from src.metrics import compute_metrics
 from src.utils import (
-    PROJECT_ROOT,
+    get_logger,
     load_config,
     load_data,
+    meta_path,
+    plot_calibration,
     plot_confusion,
     plot_pr,
     plot_roc,
+    read_meta,
+    resolve,
     setup_mlflow,
     split_data,
 )
 
+log = get_logger(__name__)
 SUBGROUP_COLS = ("sex", "race")
 
 
-def load_model(model_ref: str):
-    """Accept a local joblib path or an MLflow URI (models:/... or runs:/...)."""
+def load_model(model_ref: str, cfg: dict) -> tuple[object, dict]:
+    """Return (model, meta). Accepts a joblib path or an MLflow URI (models:/..., runs:/...)."""
     if model_ref.startswith(("models:/", "runs:/")):
-        return mlflow.sklearn.load_model(model_ref)
-    return joblib.load(model_ref)
+        model = mlflow.sklearn.load_model(model_ref)
+        info = mlflow.models.get_model_info(model_ref)
+        meta = dict(info.metadata or {})
+        meta.setdefault("run_id", info.run_id)
+        return model, meta
+    model = joblib.load(model_ref)
+    return model, read_meta(meta_path(cfg))
 
 
-def subgroup_metrics(X_test: pd.DataFrame, y_test, y_score) -> pd.DataFrame:
-    """ROC-AUC + positive rate per subgroup, a lightweight fairness check."""
+def subgroup_metrics(X_test: pd.DataFrame, y_test, y_score, threshold: float) -> pd.DataFrame:
+    """ROC-AUC, positive rate and predicted-positive rate per subgroup (fairness check)."""
     rows = []
+    score = pd.Series(y_score, index=X_test.index)
     for col in SUBGROUP_COLS:
         if col not in X_test.columns:
             continue
         for value, idx in X_test.groupby(col).groups.items():
-            yt, ys = y_test.loc[idx], pd.Series(y_score, index=X_test.index).loc[idx]
+            yt, ys = y_test.loc[idx], score.loc[idx]
             if yt.nunique() < 2:
                 continue
             rows.append(
@@ -54,6 +66,7 @@ def subgroup_metrics(X_test: pd.DataFrame, y_test, y_score) -> pd.DataFrame:
                     "group": value,
                     "n": len(idx),
                     "positive_rate": float(yt.mean()),
+                    "predicted_positive_rate": float((ys >= threshold).mean()),
                     "roc_auc": float(roc_auc_score(yt, ys)),
                 }
             )
@@ -64,35 +77,33 @@ def evaluate(cfg: dict, model_ref: str) -> dict:
     setup_mlflow(cfg)
     X, y = load_data(cfg)
     _, X_test, _, y_test = split_data(X, y, cfg)
-    model = load_model(model_ref)
+    model, meta = load_model(model_ref, cfg)
+    threshold = float(meta.get("decision_threshold", 0.5))
 
-    y_pred = model.predict(X_test)
     y_score = model.predict_proba(X_test)[:, 1]
-    metrics = compute_metrics(y_test, y_pred, y_score)
+    y_pred = (y_score >= threshold).astype(int)
+    metrics = compute_metrics(y_test, y_score, threshold)
 
-    art_dir = PROJECT_ROOT / cfg["artifacts"]["dir"]
+    art_dir = resolve(cfg["artifacts"]["dir"])
     art_dir.mkdir(parents=True, exist_ok=True)
-
-    train_info_path = art_dir / "train_run.json"
-    parent_run_id = None
-    if train_info_path.exists():
-        parent_run_id = json.loads(train_info_path.read_text()).get("run_id")
 
     with mlflow.start_run(run_name="evaluate") as run:
         mlflow.set_tags({"stage": "evaluate", "model_ref": model_ref})
-        if parent_run_id:
-            mlflow.set_tag("train_run_id", parent_run_id)
-        mlflow.log_metrics(metrics)
+        if meta.get("run_id"):
+            mlflow.set_tag("train_run_id", meta["run_id"])
+        if meta.get("version"):
+            mlflow.set_tag("model_version", str(meta["version"]))
+        mlflow.log_param("decision_threshold", round(threshold, 4))
+        mlflow.log_metrics({k: v for k, v in metrics.items() if k != "decision_threshold"})
 
-        # Plots
         for path in (
             plot_roc(y_test, y_score, art_dir),
-            plot_pr(y_test, y_score, art_dir),
+            plot_pr(y_test, y_score, art_dir, threshold),
             plot_confusion(y_test, y_pred, art_dir),
+            plot_calibration(y_test, y_score, art_dir),
         ):
             mlflow.log_artifact(str(path), artifact_path="plots")
 
-        # Classification report
         report = classification_report(
             y_test, y_pred, target_names=["<=50K", ">50K"], output_dict=True
         )
@@ -100,28 +111,29 @@ def evaluate(cfg: dict, model_ref: str) -> dict:
         report_path.write_text(json.dumps(report, indent=2))
         mlflow.log_artifact(str(report_path))
 
-        # Predictions CSV for error analysis
         preds = X_test.copy()
         preds["y_true"] = y_test.values
-        preds["y_pred"] = y_pred
         preds["y_score"] = y_score
+        preds["y_pred"] = y_pred
         preds["error"] = (preds["y_true"] != preds["y_pred"]).astype(int)
         preds_path = art_dir / "predictions.csv"
         preds.to_csv(preds_path, index=False)
         mlflow.log_artifact(str(preds_path))
 
-        # Subgroup metrics
-        sub = subgroup_metrics(X_test, y_test, y_score)
+        sub = subgroup_metrics(X_test, y_test, y_score, threshold)
         sub_path = art_dir / "subgroup_metrics.csv"
         sub.to_csv(sub_path, index=False)
         mlflow.log_artifact(str(sub_path))
         for _, r in sub.iterrows():
             mlflow.log_metric(f"roc_auc_{r['feature']}_{_slug(r['group'])}", r["roc_auc"])
+        if not sub.empty:
+            gap = sub.groupby("feature")["roc_auc"].agg(lambda s: s.max() - s.min())
+            for feat, g in gap.items():
+                mlflow.log_metric(f"roc_auc_gap_{feat}", float(g))
 
-        print(f"Evaluate run id : {run.info.run_id}")
+        log.info("evaluate run_id=%s (threshold=%.3f)", run.info.run_id, threshold)
         for k, v in metrics.items():
-            print(f"{k:<26} {v:.4f}")
-        print(f"Artifacts in    : {art_dir}")
+            log.info("%-26s %.4f", k, v)
         return metrics
 
 
@@ -135,12 +147,12 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="joblib path or MLflow URI (models:/AdultIncomeClassifier@staging). "
+        help="joblib path or MLflow URI (models:/AdultIncomeClassifier@champion). "
         "Defaults to artifacts.model_path from the config.",
     )
     args = parser.parse_args()
     cfg = load_config(args.config)
-    model_ref = args.model or str(PROJECT_ROOT / cfg["artifacts"]["model_path"])
+    model_ref = args.model or str(resolve(cfg["artifacts"]["model_path"]))
     if not model_ref.startswith(("models:/", "runs:/")) and not Path(model_ref).exists():
         raise SystemExit(f"Model not found at {model_ref}. Run `make train` first.")
     evaluate(cfg, model_ref)

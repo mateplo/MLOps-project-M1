@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 # Multi-stage build.
 #   serve (default) : minimal runtime for the FastAPI microservice (no MLflow, no matplotlib, no dev tools)
-#   train           : full environment for src.train / src.evaluate (MLflow tracking + plots)
+#   train           : full environment for src.train / src.evaluate / src.promote (MLflow tracking + plots)
 #
+# Exact versions come from the lock files (make lock); the .txt files hold the human-readable ranges.
 #   docker build -t adult-income-classifier:latest .                  # serve image
 #   docker build --target train -t adult-income-classifier:train .    # train image
 
@@ -16,8 +17,8 @@ WORKDIR /build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-COPY requirements-serve.txt .
-RUN pip install -r requirements-serve.txt \
+COPY requirements-serve.lock .
+RUN pip install -r requirements-serve.lock \
     && find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} + \
     && find /opt/venv -type d -name "tests" -prune -exec rm -rf {} +
 
@@ -29,8 +30,8 @@ WORKDIR /build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-COPY requirements.txt .
-RUN pip install -r requirements.txt \
+COPY requirements.lock .
+RUN pip install -r requirements.lock \
     && find /opt/venv -type d -name "__pycache__" -prune -exec rm -rf {} +
 
 # ---------------------------------------------------------------------------
@@ -39,8 +40,9 @@ RUN pip install -r requirements.txt \
 FROM python:${PYTHON_VERSION}-slim AS runtime-base
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH" \
-    MODEL_PATH=artifacts/model.joblib
-RUN useradd --create-home --uid 1000 app && mkdir -p /app/artifacts /app/data && chown -R app:app /app
+    MODEL_PATH=artifacts/model.joblib PREDICTION_LOG=logs/predictions.jsonl
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p /app/artifacts /app/data /app/logs && chown -R app:app /app
 COPY --chown=app:app configs ./configs
 COPY --chown=app:app src ./src
 COPY --chown=app:app examples ./examples

@@ -22,3 +22,7 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Serving logs
+logs/*
+!logs/.gitkeep

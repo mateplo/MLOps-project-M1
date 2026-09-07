@@ -7,30 +7,37 @@ data:
   test_size: 0.2
   random_state: 42
   # Columns of the original UCI file (no header in the source)
-  columns:
-    - age
-    - workclass
-    - fnlwgt
-    - education
-    - education_num
-    - marital_status
-    - occupation
-    - relationship
-    - race
-    - sex
-    - capital_gain
-    - capital_loss
-    - hours_per_week
-    - native_country
-    - income
+  columns: [age, workclass, fnlwgt, education, education_num, marital_status, occupation,
+            relationship, race, sex, capital_gain, capital_loss, hours_per_week, native_country, income]
+
+# Fail-fast checks on data/raw.csv before training (see src/validate.py)
+validation:
+  min_rows: 1000
+  target_values: ["<=50K", ">50K"]
+  positive_rate: [0.15, 0.40]
+  max_missing_rate: 0.10
+  numeric_ranges:
+    age: [16, 100]
+    education_num: [1, 16]
+    capital_gain: [0, 100000]
+    capital_loss: [0, 10000]
+    hours_per_week: [1, 99]
+  max_cardinality:
+    workclass: 10
+    sex: 2
+    race: 5
+    native_country: 50
 
 features:
-  numeric: [age, fnlwgt, education_num, capital_gain, capital_loss, hours_per_week]
-  # `education` is dropped: it is redundant with `education_num` (ordinal encoding).
+  # fnlwgt is dropped: it is a census sampling weight, not a property of the person.
+  # education is dropped: redundant with education_num (ordinal encoding).
+  numeric: [age, education_num, capital_gain, capital_loss, hours_per_week]
+  log1p: [capital_gain, capital_loss]        # heavy-tailed -> log1p before scaling
   categorical: [workclass, marital_status, occupation, relationship, race, sex, native_country]
+  min_frequency: 0.01                        # one-hot: group categories rarer than 1% (native_country has 41)
 
 model:
-  type: logreg  # logreg | random_forest | gradient_boosting
+  type: logreg
   params:
     C: [0.1, 1.0, 10.0]
     penalty: [l2]
@@ -46,7 +53,11 @@ mlflow:
   experiment_name: adult-income
   registered_model_name: AdultIncomeClassifier
   register: true
-  alias: staging
+  challenger_alias: challenger
+  champion_alias: champion
+  promotion:
+    metric: test_roc_auc     # compared on the same held-out split
+    min_improvement: 0.0
 
 artifacts:
   dir: artifacts
