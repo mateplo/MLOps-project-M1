@@ -12,7 +12,7 @@ N       ?= 300
 
 .PHONY: help init lock data validate train promote evaluate export all predict test lint format ui serve \
         simulate simulate-drift drift build build-train docker-train docker-serve \
-        compose-up compose-down compose-train compose-monitoring release-check clean
+        compose-up compose-down compose-train compose-monitoring release-check publish-model deploy-space clean
 
 help:            ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -106,6 +106,12 @@ compose-down:    ## Stop everything (keeps volumes)
 # ---------------------------------------------------------------- release
 release-check:   ## Gate before tagging: clean tree, CI green, champion exported, AUC floor, image serves it, traffic OK
 	MIN_AUC=$(or $(MIN_AUC),0.92) PORT=$(or $(RC_PORT),8001) N=$(N) IMAGE=$(IMAGE) PY=$(PY) CONFIG=$(CONFIG) scripts/release_check.sh
+
+publish-model:   ## Publish artifacts/ (exported champion) to the HF model repo (needs HF_TOKEN)
+	$(PY) -m src.publish --config $(CONFIG)
+
+deploy-space:    ## (Re)deploy the HF Space on a given image: make deploy-space IMAGE_REF=ghcr.io/mateplo/mlops-project-m1:1.0.0
+	$(PY) -m src.deploy_space --config $(CONFIG) --image $(IMAGE_REF)
 
 clean:           ## Remove caches and generated artifacts (keeps data + mlflow.db)
 	rm -rf .pytest_cache .ruff_cache artifacts/* logs/* && find . -name __pycache__ -type d -exec rm -rf {} +

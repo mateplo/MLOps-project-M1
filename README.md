@@ -59,9 +59,14 @@ MLOps-project-M1/
 │  ├─ app.py                 # FastAPI : /predict, /health (identité du modèle), /metrics (Prometheus)
 │  ├─ drift.py               # PSI entre données d'entraînement et requêtes servies -> MLflow
 │  ├─ simulate_traffic.py    # envoie des lignes réelles (ou biaisées) à l'API
+│  ├─ publish.py             # champion exporté -> dépôt de modèle HF (model card, tag vN)
+│  ├─ fetch_model.py         # dépôt HF -> artifacts/ (entrypoint de l'image serve)
+│  ├─ deploy_space.py        # génère et pousse le Space HF (README + Dockerfile FROM ghcr.io/...)
 │  └─ utils.py               # logging, config, MLflow, nettoyage, split, plots, model_meta.json
 ├─ tests/                    # unitaires (pipeline, utils, validation, drift, API) + bout en bout (train→promote→evaluate→export→drift)
 ├─ monitoring/               # prometheus.yml, provisioning Grafana + dashboard
+├─ deploy/                   # space/README.md (métadonnées du Space) + space.env (MODEL_REVISION)
+├─ scripts/                  # release_check.sh, entrypoint.sh
 ├─ docker-compose.yml        # mlflow server + api (+ profils train / monitoring)
 ├─ Dockerfile                # multi-stage : cibles `serve` (≈540 Mo) et `train`
 ├─ Makefile · requirements*.txt · requirements*.lock · pyproject.toml · .env.example

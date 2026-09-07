@@ -46,6 +46,7 @@ RUN useradd --create-home --uid 1000 app \
 COPY --chown=app:app configs ./configs
 COPY --chown=app:app src ./src
 COPY --chown=app:app examples ./examples
+COPY --chown=app:app scripts/entrypoint.sh ./entrypoint.sh
 
 # ---------------------------------------------------------------------------
 # Target: train
@@ -61,8 +62,11 @@ CMD ["python", "-m", "src.train", "--config", "configs/config.yaml"]
 # ---------------------------------------------------------------------------
 FROM runtime-base AS serve
 COPY --from=builder-serve /opt/venv /opt/venv
+# MODEL_REPO=<owner>/<repo> makes the container download the published model at start-up
+# (Hugging Face Space); leave empty to serve a mounted artifacts/ directory.
+ENV MODEL_REPO="" MODEL_REVISION=main
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"
-CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["./entrypoint.sh"]
