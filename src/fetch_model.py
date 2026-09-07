@@ -4,7 +4,7 @@ Used by the serving image entrypoint (e.g. on a HF Space, where nothing is mount
 Deliberately free of heavy imports: only huggingface_hub.
 
 Env:
-    MODEL_REPO      e.g. mateplo/adult-income-classifier   (required to do anything)
+    MODEL_REPO      e.g. Mateplo/adult-income-classifier   (required to do anything)
     MODEL_REVISION  branch or tag of that repo, default "main"
     MODEL_PATH      where to put model.joblib, default artifacts/model.joblib
     HF_TOKEN        only needed for a private model repo

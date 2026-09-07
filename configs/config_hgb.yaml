@@ -68,5 +68,5 @@ artifacts:
 # Hugging Face: model repo = distribution of the published champion, space = the running API.
 # Override with HF_MODEL_REPO / HF_SPACE_REPO env vars (e.g. in CI).
 hf:
-  model_repo: mateplo/adult-income-classifier
-  space_repo: mateplo/adult-income-classifier
+  model_repo: Mateplo/adult-income-classifier
+  space_repo: Mateplo/adult-income-classifier
