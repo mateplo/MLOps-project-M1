@@ -59,13 +59,14 @@ MLOps-project-M1/
 │  ├─ app.py                 # FastAPI : /predict, /health (identité du modèle), /metrics (Prometheus)
 │  ├─ drift.py               # PSI entre données d'entraînement et requêtes servies -> MLflow
 │  ├─ simulate_traffic.py    # envoie des lignes réelles (ou biaisées) à l'API
-│  ├─ publish.py             # champion exporté -> dépôt de modèle HF (model card, tag vN)
+│  ├─ export_onnx.py         # joblib -> model.onnx + preprocess.json, validé contre sklearn
+│  ├─ publish.py             # champion exporté (joblib + onnx) -> dépôt de modèle HF (model card, tag vN)
 │  ├─ fetch_model.py         # dépôt HF -> artifacts/ (entrypoint de l'image serve)
-│  ├─ deploy_space.py        # génère et pousse le Space HF (README + Dockerfile FROM ghcr.io/...)
+│  ├─ deploy_space.py        # génère et pousse le Space HF statique (index.html + app.js + config.json)
 │  └─ utils.py               # logging, config, MLflow, nettoyage, split, plots, model_meta.json
 ├─ tests/                    # unitaires (pipeline, utils, validation, drift, API) + bout en bout (train→promote→evaluate→export→drift)
 ├─ monitoring/               # prometheus.yml, provisioning Grafana + dashboard
-├─ deploy/                   # space/README.md (métadonnées du Space) + space.env (MODEL_REVISION)
+├─ deploy/                   # space/ (site statique : README, index.html, app.js) + space.env (MODEL_REVISION)
 ├─ scripts/                  # release_check.sh, entrypoint.sh
 ├─ docker-compose.yml        # mlflow server + api (+ profils train / monitoring)
 ├─ Dockerfile                # multi-stage : cibles `serve` (≈540 Mo) et `train`
@@ -214,6 +215,43 @@ make release-check                     # toutes les vérifications, conteneur de
 git tag -a v1.0.0 -m "AdultIncomeClassifier v9 (test_roc_auc 0.930)" && git push origin v1.0.0
 docker pull ghcr.io/mateplo/mlops-project-m1:1.0.0     # une fois le package rendu public
 ```
+
+## Déploiement Hugging Face (piloté par GitHub)
+
+GitHub reste la source de vérité ; Hugging Face ne fait qu'héberger ce que la CI a produit.
+Les Spaces Docker sont devenus payants (PRO), donc le Space est **statique** : le modèle tourne
+**dans le navigateur** avec ONNX Runtime Web, exactement le pattern des labs transformers.js du cours.
+
+```
+GitHub (code, CI, gate, tag) ──▶ GHCR : image serve vX.Y.Z (API FastAPI, multi-arch)
+        │
+        └─▶ HF Hub, dépôt modèle ─────────▶ HF Space statique (index.html + app.js)
+            model.joblib + model_meta.json     télécharge model.onnx + preprocess.json
+            model.onnx + preprocess.json       et prédit côté client, seuil inclus
+            tag vN = version du registre
+```
+
+- **Export ONNX** (`make export-onnx`, `src/export_onnx.py`) : trois briques scikit-learn n'ont pas de
+  convertisseur, elles sont traitées à l'export : `FunctionTransformer(log1p)` par un convertisseur
+  custom (`Log(Add(x,1))`), l'imputation des chaînes en traitant `"?"` comme manquant, et
+  `OneHotEncoder(min_frequency)` en remplaçant l'encodeur par un one-hot classique dont les catégories
+  sont les fréquentes plus le bucket `infrequent_sklearn`, le regroupement étant fait par le JavaScript
+  d'après `preprocess.json`. L'export est **validé contre scikit-learn** sur 5 000 lignes
+  (écart max 2e-7) ; `make release-check` refuse la release si l'écart dépasse 1e-4.
+- **Dépôt de modèle HF** (`hf.model_repo`) : `make publish-model` y pousse le champion exporté
+  (joblib pour l'API, ONNX + spec pour le navigateur, métadonnées, model card) avec un tag
+  `v<version du registre>`. Refuse tout modèle qui n'est pas `champion`. Appelé en fin de `make release-check`.
+- **Space HF statique** (`hf.space_repo`) : entièrement généré depuis `deploy/space/` par le job
+  `deploy-space` de la CI sur chaque tag `v*`, avec un `config.json` qui pointe sur le dépôt de modèle
+  et la révision de `deploy/space.env` (`main` = dernier champion publié, ou `v9` pour épingler).
+  La page affiche la version du registre, le `run_id` et le seuil qu'elle utilise.
+- **Image serve** : inchangée, c'est le déploiement « serveur » (API, journal, `/metrics`) pour un
+  VPS ou un cloud. Si `MODEL_REPO` est défini, elle télécharge le modèle depuis le Hub au démarrage.
+
+Mise en place, une seule fois : token HF en écriture dans le secret `HF_TOKEN` de l'environment GitHub
+`huggingface`, et `hf.model_repo` / `hf.space_repo` au nom de ton compte (ou variables `HF_MODEL_REPO` /
+`HF_SPACE_REPO`). Ensuite chaque release : `make release-check` → `git tag vX.Y.Z` → image GHCR,
+Space redéployé, GitHub Release.
 
 ## Workflow Git
 

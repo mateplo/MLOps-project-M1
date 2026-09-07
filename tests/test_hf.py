@@ -1,7 +1,7 @@
 import json
 
 import src.fetch_model as fm
-from src.deploy_space import read_env_file, render_dockerfile
+from src.deploy_space import build_site, read_env_file, render_config
 from src.publish import model_card
 
 META = {
@@ -25,13 +25,20 @@ def test_model_card_lists_identity_and_metrics():
     assert "| decision_threshold |" not in card.split("## Held-out")[1]
 
 
-def test_render_dockerfile_and_env(tmp_path):
+def test_static_site_build_and_env(tmp_path):
     env_file = tmp_path / "space.env"
     env_file.write_text("# comment\nMODEL_REVISION=v9\n\nFOO = bar\n")
     env = read_env_file(env_file)
     assert env == {"MODEL_REVISION": "v9", "FOO": "bar"}
-    df = render_dockerfile("ghcr.io/o/r:1.0.0", "o/model", env)
-    assert 'FROM ghcr.io/o/r:1.0.0\nENV MODEL_REPO="o/model"\nENV MODEL_REVISION="v9"' in df
+    assert render_config("o/model", "v9", "ghcr.io/o/r:1.0.0") == {
+        "model_repo": "o/model",
+        "model_revision": "v9",
+        "api_image": "ghcr.io/o/r:1.0.0",
+    }
+    files = build_site(tmp_path / "site", "o/model", "v9")
+    assert set(files) == {"README.md", "index.html", "app.js", "config.json"}
+    assert "sdk: static" in (tmp_path / "site" / "README.md").read_text()
+    assert json.loads((tmp_path / "site" / "config.json").read_text())["model_revision"] == "v9"
 
 
 def test_fetch_skips_when_model_present(tmp_path, monkeypatch):
