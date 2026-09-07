@@ -1,3 +1,4 @@
+PYTHON  ?= python3.11
 PY      ?= .venv/bin/python
 PIP     ?= .venv/bin/pip
 CONFIG  ?= configs/config.yaml
@@ -10,8 +11,8 @@ IMAGE   ?= adult-income-classifier:latest
 help:            ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-init:            ## Create venv and install dependencies
-	python3 -m venv .venv && $(PIP) install -U pip && $(PIP) install -r requirements.txt
+init:            ## Create venv (Python 3.11 by default: make init PYTHON=python3.12) and install deps
+	$(PYTHON) -m venv .venv && $(PIP) install -U pip && $(PIP) install -r requirements.txt
 
 data:            ## Download the UCI Adult dataset to data/raw.csv
 	$(PY) -m src.data --config $(CONFIG)

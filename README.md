@@ -48,8 +48,10 @@ MLOps-project-M1/
 
 ## Quickstart
 
+Prérequis : Python 3.11 (`brew install python@3.11` sur macOS) et, pour la partie conteneur, Docker.
+
 ```bash
-make init                 # venv + dépendances
+make init                 # venv Python 3.11 + dépendances (make init PYTHON=python3.12 pour changer)
 cp .env.example .env      # MLFLOW_TRACKING_URI=sqlite:///mlflow.db, MLFLOW_EXPERIMENT_NAME=adult-income
 make data                 # télécharge le dataset dans data/raw.csv
 make train                # GridSearchCV (5-fold stratifié, roc_auc) + tracking + registre
@@ -96,7 +98,7 @@ Split stratifié 80/20, seed 42, CV 5-fold stratifiée sur `roc_auc`.
 | Logistic regression (`config.yaml`) | C=0.1, l2, lbfgs | 0.905 | 0.904 | 0.761 | 0.655 |
 | Random forest (`config_rf.yaml`) | 200 arbres, max_depth=20, min_samples_leaf=1 | 0.918 | **0.921** | 0.814 | 0.694 |
 
-Le random forest est la version 2 du registre et porte l'alias `staging`.
+Chaque `make train` enregistre une nouvelle version et lui donne l'alias `staging` (la dernière version entraînée est donc celle servie via `models:/AdultIncomeClassifier@staging`). Le random forest est le meilleur des deux et la version courante en `staging`.
 
 ### Note sur les sous-groupes
 
@@ -120,7 +122,7 @@ sur une valeur hors plage, et l'API renvoie 503 si aucun modèle n'est entraîn�
 ## Docker
 
 ```bash
-make build                                   # image adult-income-classifier:latest
+make build                                   # image adult-income-classifier:latest (~1.4 GB, python:3.11-slim)
 make docker-serve                            # sert artifacts/model.joblib sur :8000
 make docker-train                            # entraîne dans le conteneur (monte data/, artifacts/, mlflow.db)
 ```
