@@ -56,7 +56,11 @@ echo "$OUT" | grep -q " 0 errors" || fail "simulate reported errors: $OUT"
 ok "$(echo "$OUT" | sed -E 's/.*INFO +__main__: //')"
 docker rm -f "$CONTAINER" >/dev/null
 
-echo "7. Publish the champion to the Hugging Face model repo"
+echo "7. ONNX export (in-browser inference) matches sklearn"
+"$PY" -W ignore -m src.export_onnx --config "$CONFIG" 2>&1 | grep -E "validated|Error" | grep -q validated || fail "ONNX export failed or diverged"
+ok "model.onnx + preprocess.json exported and validated"
+
+echo "8. Publish the champion to the Hugging Face model repo"
 if [ -n "${HF_TOKEN:-}" ]; then
   "$PY" -W ignore -m src.publish --config "$CONFIG" 2>&1 | grep -E "published|Error" || fail "publish failed"
   ok "published v$VERSION (the Space will download it at start-up)"

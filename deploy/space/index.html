@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adult Income Classifier</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --muted:#5b6470; --line:#e1e5ea; --accent:#2f6fed; --ok:#1a7f37; --warn:#b35c00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1216; --card:#171b21; --fg:#e6e9ee; --muted:#9aa4b1; --line:#2a313b; --accent:#6ea0ff; --ok:#3fb950; --warn:#e3a53c; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 960px; margin: 0 auto; padding: 28px 20px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  input, select { font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+  button { grid-column: 1 / -1; margin-top: 6px; padding: 10px; font: inherit; font-weight: 600; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .result { font-size: 1.05rem; }
+  .label { font-size: 1.6rem; font-weight: 700; margin: 6px 0; }
+  .label.pos { color: var(--ok); } .label.neg { color: var(--warn); }
+  .bar { height: 10px; background: var(--line); border-radius: 6px; overflow: hidden; position: relative; margin: 8px 0 4px; }
+  .bar > i { display:block; height:100%; background: var(--accent); width:0; transition: width .3s; }
+  .bar > b { position:absolute; top:-3px; width:2px; height:16px; background: var(--fg); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; margin: 14px 0 0; }
+  dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .status { font-size: 13px; color: var(--muted); }
+  .err { color: #d1242f; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+  footer { margin-top: 22px; font-size: 13px; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Adult Income Classifier</h1>
+  <p class="sub">Does this person earn more than 50K$/year? The model runs <strong>in your browser</strong> with ONNX Runtime Web — nothing is sent to a server.</p>
+  <div class="grid">
+    <section class="card">
+      <form id="form"></form>
+    </section>
+    <section class="card">
+      <div id="status" class="status">Loading model…</div>
+      <div id="result" class="result" hidden>
+        <div>Prediction</div>
+        <div id="label" class="label">—</div>
+        <div class="bar"><i id="fill"></i><b id="thr"></b></div>
+        <div class="status"><span id="score"></span> · threshold <span id="threshold"></span></div>
+      </div>
+      <dl id="meta"></dl>
+      <div id="error" class="err"></div>
+    </section>
+  </div>
+  <footer>
+    Model and threshold are published from the MLflow registry of
+    <a href="https://github.com/mateplo/MLOps-project-M1" target="_blank" rel="noopener">mateplo/MLOps-project-M1</a>.
+    The same model is served as a FastAPI microservice (Docker image on GHCR).
+    Trained on the 1994 US census (UCI Adult): an educational demo, not a decision tool.
+  </footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
