@@ -42,7 +42,7 @@ MLOps-project-M1/
 ├─ examples/person.json      # payload d'exemple pour l'API
 ├─ data/                     # gitignoré
 ├─ artifacts/                # gitignoré : model.joblib, plots, predictions.csv, train_run.json
-├─ Makefile · Dockerfile · requirements.txt · pyproject.toml · .env.example
+├─ Makefile · Dockerfile (multi-stage) · requirements.txt · requirements-serve.txt · pyproject.toml · .env.example
 └─ .github/workflows/ci.yml  # ruff + pytest
 ```
 
@@ -56,7 +56,7 @@ cp .env.example .env      # MLFLOW_TRACKING_URI=sqlite:///mlflow.db, MLFLOW_EXPE
 make data                 # télécharge le dataset dans data/raw.csv
 make train                # GridSearchCV (5-fold stratifié, roc_auc) + tracking + registre
 make evaluate             # plots + predictions.csv + métriques par sous-groupe -> MLflow
-make ui                   # MLflow UI sur http://127.0.0.1:5000
+make ui                   # MLflow UI sur http://127.0.0.1:5001 (5000 est pris par AirPlay sur macOS)
 make test                 # pytest
 make lint                 # ruff
 ```
@@ -121,10 +121,27 @@ sur une valeur hors plage, et l'API renvoie 503 si aucun modèle n'est entraîn�
 
 ## Docker
 
+Le `Dockerfile` est multi-stage avec deux cibles :
+
+| Cible | Contenu | Usage |
+|---|---|---|
+| `serve` (défaut) | venv minimal (`requirements-serve.txt` : scikit-learn, pandas, FastAPI) copié depuis un stage builder, utilisateur non-root, healthcheck | `make build` puis `make docker-serve` |
+| `train` | venv complet (`requirements.txt` : + MLflow, matplotlib) | `make build-train` puis `make docker-train` |
+
+Les dépendances sont installées dans `/opt/venv` dans un stage builder, puis seul le venv nettoyé
+(sans cache pip ni `__pycache__`) est copié dans l'image finale. L'image de serving ne contient donc
+ni MLflow ni ses dépendances lourdes (SQLAlchemy, Flask, pyarrow, ...), ce qui divise le poids par
+environ 2,5 (≈540 Mo contre ≈1,4 Go pour une image monolithique).
+
+`docker-train` monte le projet dans le conteneur **au même chemin absolu que sur l'hôte** et
+tourne avec l'UID de l'utilisateur : MLflow stocke des URIs d'artefacts absolues dans `mlflow.db`,
+ce montage garantit qu'elles restent valides des deux côtés, et que `mlflow.db`, `mlruns/` et
+`artifacts/` restent lisibles depuis `make ui` en local.
+
 ```bash
-make build                                   # image adult-income-classifier:latest (~1.4 GB, python:3.11-slim)
-make docker-serve                            # sert artifacts/model.joblib sur :8000
-make docker-train                            # entraîne dans le conteneur (monte data/, artifacts/, mlflow.db)
+make build            # image de serving adult-income-classifier:latest
+make docker-serve     # sert artifacts/model.joblib sur :8000
+make docker-train     # build de l'image train + entraînement dans le conteneur
 ```
 
 ## Choix techniques

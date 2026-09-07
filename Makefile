@@ -4,9 +4,12 @@ PIP     ?= .venv/bin/pip
 CONFIG  ?= configs/config.yaml
 EXP     ?= adult-income
 PORT    ?= 8000
+# 5000 is taken by the AirPlay Receiver on macOS
+MLFLOW_PORT ?= 5001
 IMAGE   ?= adult-income-classifier:latest
+IMAGE_TRAIN ?= adult-income-classifier:train
 
-.PHONY: help init data train evaluate all predict test lint format ui serve build docker-train docker-serve clean
+.PHONY: help init data train evaluate all predict test lint format ui serve build build-train docker-train docker-serve clean
 
 help:            ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -37,22 +40,25 @@ lint:            ## Lint with ruff
 format:          ## Auto-format / fix with ruff
 	$(PY) -m ruff format . && $(PY) -m ruff check --fix .
 
-ui:              ## Launch the MLflow UI (http://127.0.0.1:5000)
-	.venv/bin/mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+ui:              ## Launch the MLflow UI (http://127.0.0.1:$(MLFLOW_PORT))
+	.venv/bin/mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port $(MLFLOW_PORT)
 
 serve:           ## Run the FastAPI microservice locally
 	.venv/bin/uvicorn src.app:app --host 0.0.0.0 --port $(PORT) --reload
 
-build:           ## Build the Docker image
-	docker build -t $(IMAGE) .
+build:           ## Build the serving Docker image (minimal runtime)
+	docker build --target serve -t $(IMAGE) .
 
-docker-train:    ## Train inside Docker (mounts data/, artifacts/ and mlflow.db)
-	docker run --rm -v $(PWD)/data:/app/data -v $(PWD)/artifacts:/app/artifacts \
-		-v $(PWD)/mlruns:/app/mlruns -v $(PWD)/mlflow.db:/app/mlflow.db \
-		$(IMAGE) python -m src.train --config $(CONFIG)
+build-train:     ## Build the training Docker image (MLflow + plots)
+	docker build --target train -t $(IMAGE_TRAIN) .
+
+docker-train: build-train  ## Train inside Docker. The project is mounted at its host path so MLflow's absolute artifact URIs stay valid
+	docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp \
+		-v "$(PWD):$(PWD)" -w "$(PWD)" \
+		$(IMAGE_TRAIN) python -m src.train --config $(CONFIG)
 
 docker-serve:    ## Serve the API from Docker on $(PORT)
-	docker run --rm -p $(PORT):8000 -v $(PWD)/artifacts:/app/artifacts $(IMAGE)
+	docker run --rm -p $(PORT):8000 -v "$(PWD)/artifacts:/app/artifacts" $(IMAGE)
 
 clean:           ## Remove caches and generated artifacts (keeps data + mlflow.db)
 	rm -rf .pytest_cache .ruff_cache artifacts/* && find . -name __pycache__ -type d -exec rm -rf {} +
