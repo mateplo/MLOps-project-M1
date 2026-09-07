@@ -59,9 +59,14 @@ MLOps-project-M1/
 │  ├─ app.py                 # FastAPI : /predict, /health (identité du modèle), /metrics (Prometheus)
 │  ├─ drift.py               # PSI entre données d'entraînement et requêtes servies -> MLflow
 │  ├─ simulate_traffic.py    # envoie des lignes réelles (ou biaisées) à l'API
+│  ├─ publish.py             # champion exporté -> dépôt de modèle HF (model card, tag vN)
+│  ├─ fetch_model.py         # dépôt HF -> artifacts/ (entrypoint de l'image serve)
+│  ├─ deploy_space.py        # génère et pousse le Space HF (README + Dockerfile FROM ghcr.io/...)
 │  └─ utils.py               # logging, config, MLflow, nettoyage, split, plots, model_meta.json
 ├─ tests/                    # unitaires (pipeline, utils, validation, drift, API) + bout en bout (train→promote→evaluate→export→drift)
 ├─ monitoring/               # prometheus.yml, provisioning Grafana + dashboard
+├─ deploy/                   # space/README.md (métadonnées du Space) + space.env (MODEL_REVISION)
+├─ scripts/                  # release_check.sh, entrypoint.sh
 ├─ docker-compose.yml        # mlflow server + api (+ profils train / monitoring)
 ├─ Dockerfile                # multi-stage : cibles `serve` (≈540 Mo) et `train`
 ├─ Makefile · requirements*.txt · requirements*.lock · pyproject.toml · .env.example
@@ -226,7 +231,8 @@ git push -u origin feat/ma-modif        # puis ouvrir la PR sur GitHub, fusionne
 
 - **test** : `ruff check`, `ruff format --check`, `pytest` (avec le test bout en bout sur données synthétiques et registre SQLite temporaire).
 - **smoke-train** : téléchargement du dataset réel, validation, `train → promote → evaluate → export` avec `config_ci.yaml`, artefacts uploadés.
-- **docker** : build des cibles `serve` et `train` ; sur un tag `v*`, push de l'image `serve` sur `ghcr.io/<owner>/mlops-project-m1`.
+- **release** (tag `v*`) : crée la GitHub Release avec les notes générées : commande `docker pull`, plateformes du manifeste, digest, commit, statut du déploiement HF, liens Space et modèle, et le changelog automatique des commits depuis le tag précédent.
+- **docker** : build des cibles `serve` et `train` ; sur un tag `v*`, build **multi-plateforme** (`linux/amd64` + `linux/arm64`, donc Apple Silicon natif et HF Spaces) et push de l'image `serve` sur `ghcr.io/<owner>/mlops-project-m1`. `make build-multi` fait la même vérification en local.
 
 ## Choix techniques
 

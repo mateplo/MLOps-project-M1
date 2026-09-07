@@ -56,6 +56,14 @@ echo "$OUT" | grep -q " 0 errors" || fail "simulate reported errors: $OUT"
 ok "$(echo "$OUT" | sed -E 's/.*INFO +__main__: //')"
 docker rm -f "$CONTAINER" >/dev/null
 
+echo "7. Publish the champion to the Hugging Face model repo"
+if [ -n "${HF_TOKEN:-}" ]; then
+  "$PY" -W ignore -m src.publish --config "$CONFIG" 2>&1 | grep -E "published|Error" || fail "publish failed"
+  ok "published v$VERSION (the Space will download it at start-up)"
+else
+  printf "  \033[33m!\033[0m HF_TOKEN not set: skipped (export HF_TOKEN=... to publish)\n"
+fi
+
 echo
 echo "All checks passed. Suggested release:"
 echo "  git tag -a vX.Y.Z -m \"AdultIncomeClassifier v$VERSION (test_roc_auc $AUC, run ${RUN_ID:0:8})\" && git push origin vX.Y.Z"
