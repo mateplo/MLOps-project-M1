@@ -12,7 +12,7 @@ N       ?= 300
 
 .PHONY: help init lock data validate train promote evaluate export all predict test lint format ui serve \
         simulate simulate-drift drift build build-train docker-train docker-serve \
-        compose-up compose-down compose-train compose-monitoring release-check publish-model deploy-space clean
+        compose-up compose-down compose-train compose-monitoring release-check publish-model deploy-space build-multi clean
 
 help:            ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -79,6 +79,9 @@ drift:           ## PSI drift report from logs/predictions.jsonl -> artifacts/dr
 # ---------------------------------------------------------------- docker
 build:           ## Build the serving Docker image (minimal runtime)
 	docker build --target serve -t $(IMAGE) .
+
+build-multi:     ## Check the serve image builds for linux/amd64 + linux/arm64 (buildx, no push)
+	docker buildx build --platform linux/amd64,linux/arm64 --target serve -t $(IMAGE) .
 
 build-train:     ## Build the training Docker image (MLflow + plots)
 	docker build --target train -t $(IMAGE_TRAIN) .

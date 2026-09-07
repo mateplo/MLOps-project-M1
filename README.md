@@ -219,7 +219,7 @@ docker pull ghcr.io/mateplo/mlops-project-m1:1.0.0     # une fois le package ren
 
 - **test** : `ruff check`, `ruff format --check`, `pytest` (avec le test bout en bout sur données synthétiques et registre SQLite temporaire).
 - **smoke-train** : téléchargement du dataset réel, validation, `train → promote → evaluate → export` avec `config_ci.yaml`, artefacts uploadés.
-- **docker** : build des cibles `serve` et `train` ; sur un tag `v*`, push de l'image `serve` sur `ghcr.io/<owner>/mlops-project-m1`.
+- **docker** : build des cibles `serve` et `train` ; sur un tag `v*`, build **multi-plateforme** (`linux/amd64` + `linux/arm64`, donc Apple Silicon natif et HF Spaces) et push de l'image `serve` sur `ghcr.io/<owner>/mlops-project-m1`. `make build-multi` fait la même vérification en local.
 
 ## Choix techniques
 
